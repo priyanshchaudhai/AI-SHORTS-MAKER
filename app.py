@@ -1,3 +1,4 @@
+
 from pathlib import Path
 from uuid import uuid4
 
@@ -29,6 +30,8 @@ def home():
 
 def run_processing(job_id, video_path, output_dir, video_format):
     try:
+        print(f"[{job_id}] Processing started", flush=True)
+
         JOBS[job_id].update({
             "status": "processing",
             "progress": 5,
@@ -36,10 +39,17 @@ def run_processing(job_id, video_path, output_dir, video_format):
         })
 
         def update_progress(value, message):
+            print(
+                f"[{job_id}] Progress {value}%: {message}",
+                flush=True
+            )
+
             JOBS[job_id].update({
                 "progress": value,
                 "message": message
             })
+
+        print(f"[{job_id}] Calling processor.py", flush=True)
 
         results = process_video(
             video_path,
@@ -65,7 +75,14 @@ def run_processing(job_id, video_path, output_dir, video_format):
             "shorts": shorts
         })
 
+        print(f"[{job_id}] Processing completed", flush=True)
+
     except Exception as error:
+        print(
+            f"[{job_id}] ERROR: {repr(error)}",
+            flush=True
+        )
+
         JOBS[job_id].update({
             "status": "failed",
             "progress": 0,
@@ -74,6 +91,7 @@ def run_processing(job_id, video_path, output_dir, video_format):
 
     finally:
         video_path.unlink(missing_ok=True)
+        print(f"[{job_id}] Cleanup finished", flush=True)
 
 
 @app.post("/upload")
@@ -129,6 +147,8 @@ async def upload_video(
         "message": "Video uploaded. Waiting for AI processing...",
         "shorts": []
     }
+
+    print(f"[{job_id}] Upload successful", flush=True)
 
     background_tasks.add_task(
         run_processing,
