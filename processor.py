@@ -12,7 +12,7 @@ def get_model():
 
     if MODEL is None:
         MODEL = WhisperModel(
-            "small",
+            "tiny",
             device="cpu",
             compute_type="int8"
         )
@@ -21,23 +21,34 @@ def get_model():
 
 
 def make_srt_time(seconds):
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int((seconds - int(seconds)) * 1000)
+    total_ms = round(seconds * 1000)
 
-    return (
-        f"{hours:02}:{minutes:02}:"
-        f"{secs:02},{millis:03}"
-    )
+    hours, remainder = divmod(total_ms, 3600000)
+    minutes, remainder = divmod(remainder, 60000)
+    secs, millis = divmod(remainder, 1000)
+
+    return f"{hours:02}:{minutes:02}:{secs:02},{millis:03}"
 
 
-def process_video(video_path, output_dir, video_format="9:16"):
+def process_video(
+    video_path,
+    output_dir,
+    video_format="9:16",
+    progress_callback=None
+):
+    def update(value, message):
+        if progress_callback:
+            progress_callback(value, message)
+
     video_path = Path(video_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    update(10, "Loading AI speech model...")
+
     model = get_model()
+
+    update(15, "AI is analyzing your video...")
 
     segments, info = model.transcribe(
         str(video_path),
@@ -52,6 +63,14 @@ def process_video(video_path, output_dir, video_format="9:16"):
     duration = info.duration
     clip_length = 30
     windows = []
+
+    keywords = [
+        "wow", "amazing", "secret",
+        "important", "best", "why",
+        "how", "incredible", "never"
+    ]
+
+    update(55, "AI analysis completed. Creating clips...")
 
     start = 0
 
@@ -75,20 +94,15 @@ def process_video(video_path, output_dir, video_format="9:16"):
 
                     text = segment.text.lower()
 
-                    keywords = [
-                        "wow", "amazing", "secret",
-                        "important", "best", "why",
-                        "how", "incredible", "never"
-                    ]
-
                     score += sum(
                         2 for word in keywords
                         if word in text
                     )
 
-            windows.append(
-                (score, start, end, selected)
-            )
+            if selected:
+                windows.append(
+                    (score, start, end, selected)
+                )
 
         start += clip_length
 
@@ -96,6 +110,9 @@ def process_video(video_path, output_dir, video_format="9:16"):
         key=lambda item: item[0],
         reverse=True
     )
+
+    if not windows:
+        raise ValueError("No suitable clips found.")
 
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
 
@@ -111,10 +128,16 @@ def process_video(video_path, output_dir, video_format="9:16"):
     width, height = formats[video_format].split(":")
 
     results = []
+    selected_windows = windows[:3]
 
     for index, (_, start, end, selected) in enumerate(
-        windows[:3], start=1
+        selected_windows, start=1
     ):
+        update(
+            55 + int((index - 1) / len(selected_windows) * 40),
+            f"Creating AI Short {index} of {len(selected_windows)}..."
+        )
+
         output_video = output_dir / f"short_{index}.mp4"
         output_srt = output_dir / f"short_{index}.srt"
 
@@ -139,11 +162,16 @@ def process_video(video_path, output_dir, video_format="9:16"):
             str(output_video)
         ]
 
-        subprocess.run(
+        result = subprocess.run(
             command,
-            check=True,
-            capture_output=True
+            capture_output=True,
+            text=True
         )
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                "FFmpeg error: " + result.stderr[-2000:]
+            )
 
         subtitles = []
 
@@ -172,5 +200,7 @@ def process_video(video_path, output_dir, video_format="9:16"):
             "start": start,
             "end": end
         })
+
+    update(100, "AI Shorts are ready!")
 
     return results
