@@ -1,6 +1,7 @@
 
 from pathlib import Path
 from uuid import uuid4
+import traceback
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
@@ -16,7 +17,7 @@ UPLOADS = BASE / "uploads"
 OUTPUTS = BASE / "outputs"
 
 for folder in [STATIC, UPLOADS, OUTPUTS]:
-    folder.mkdir(exist_ok=True)
+    folder.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -28,28 +29,26 @@ def home():
     return FileResponse(STATIC / "index.html")
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 def run_processing(job_id, video_path, output_dir, video_format):
     try:
-        print(f"[{job_id}] Processing started", flush=True)
-
         JOBS[job_id].update({
             "status": "processing",
             "progress": 5,
             "message": "Starting AI processing..."
         })
 
-        def update_progress(value, message):
-            print(
-                f"[{job_id}] Progress {value}%: {message}",
-                flush=True
-            )
+        output_dir.mkdir(parents=True, exist_ok=True)
 
+        def update_progress(value, message):
             JOBS[job_id].update({
                 "progress": value,
                 "message": message
             })
-
-        print(f"[{job_id}] Calling processor.py", flush=True)
 
         results = process_video(
             video_path,
@@ -75,23 +74,17 @@ def run_processing(job_id, video_path, output_dir, video_format):
             "shorts": shorts
         })
 
-        print(f"[{job_id}] Processing completed", flush=True)
-
     except Exception as error:
-        print(
-            f"[{job_id}] ERROR: {repr(error)}",
-            flush=True
-        )
+        traceback.print_exc()
 
         JOBS[job_id].update({
             "status": "failed",
             "progress": 0,
-            "message": str(error)
+            "message": f"Processing failed: {str(error)[:500]}"
         })
 
     finally:
         video_path.unlink(missing_ok=True)
-        print(f"[{job_id}] Cleanup finished", flush=True)
 
 
 @app.post("/upload")
@@ -113,8 +106,8 @@ async def upload_video(
     video_path = UPLOADS / f"{job_id}{extension}"
     output_dir = OUTPUTS / job_id
 
-    total_size = 0
     max_size = 500 * 1024 * 1024
+    total_size = 0
 
     try:
         with open(video_path, "wb") as output:
@@ -128,15 +121,19 @@ async def upload_video(
 
                 if total_size > max_size:
                     raise HTTPException(
-                        413,
-                        "Maximum video size is 500 MB"
+                        status_code=413,
+                        detail="Maximum video size is 500 MB"
                     )
 
                 output.write(chunk)
 
-    except Exception:
+    except HTTPException:
         video_path.unlink(missing_ok=True)
         raise
+
+    except Exception:
+        video_path.unlink(missing_ok=True)
+        raise HTTPException(500, "Video upload failed")
 
     finally:
         await file.close()
@@ -144,11 +141,9 @@ async def upload_video(
     JOBS[job_id] = {
         "status": "queued",
         "progress": 0,
-        "message": "Video uploaded. Waiting for AI processing...",
+        "message": "Upload complete. Processing queued...",
         "shorts": []
     }
-
-    print(f"[{job_id}] Upload successful", flush=True)
 
     background_tasks.add_task(
         run_processing,
@@ -161,6 +156,7 @@ async def upload_video(
     return {
         "success": True,
         "job_id": job_id,
+        "status": "queued",
         "message": "Video uploaded successfully!"
     }
 
@@ -172,7 +168,7 @@ def get_status(job_id: str):
 
     job = JOBS.get(job_id)
 
-    if not job:
+    if job is None:
         raise HTTPException(404, "Job not found")
 
     return job
@@ -180,6 +176,7 @@ def get_status(job_id: str):
 
 @app.get("/download/{job_id}/{filename}")
 def download_short(job_id: str, filename: str):
+
     if (
         not job_id.isalnum()
         or Path(filename).name != filename
