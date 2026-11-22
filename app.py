@@ -29,6 +29,32 @@ JOBS = {}
 JOB_LOCK = threading.Lock()
 
 
+# -------------------------
+# FRONTEND WEBSITE
+# -------------------------
+
+@app.route("/")
+def home():
+    return send_from_directory(BASE, "index.html")
+
+
+@app.route("/script.js")
+def javascript():
+    return send_from_directory(BASE, "script.js")
+
+
+@app.route("/health")
+def health():
+    return jsonify({
+        "status": "healthy",
+        "version": "4.0"
+    })
+
+
+# -------------------------
+# AI MODEL
+# -------------------------
+
 def get_model():
     global MODEL
 
@@ -42,6 +68,10 @@ def get_model():
     return MODEL
 
 
+# -------------------------
+# FFMPEG
+# -------------------------
+
 def run_ffmpeg(args):
     return subprocess.run(
         [FFMPEG] + args,
@@ -52,6 +82,7 @@ def run_ffmpeg(args):
 
 
 def get_video_duration(path):
+
     result = run_ffmpeg(["-i", str(path)])
 
     match = re.search(
@@ -71,6 +102,10 @@ def get_video_duration(path):
     )
 
 
+# -------------------------
+# AI CLIP SELECTION
+# -------------------------
+
 def select_best_clips(segments, video_duration, clip_length):
 
     if video_duration < clip_length:
@@ -78,17 +113,17 @@ def select_best_clips(segments, video_duration, clip_length):
             f"Video must be at least {clip_length} seconds long."
         )
 
-    candidates = []
-
-    last_start = video_duration - clip_length
-    start = 0
-
     keywords = [
         "important", "secret", "amazing",
         "surprising", "why", "how",
         "best", "never", "because",
         "but", "however", "finally"
     ]
+
+    candidates = []
+
+    last_start = video_duration - clip_length
+    start = 0
 
     while start <= last_start:
 
@@ -111,12 +146,12 @@ def select_best_clips(segments, video_duration, clip_length):
                 for word in keywords
             )
 
-            speech_score = min(len(words), 250)
+            score = min(len(words), 250) + keyword_score * 12
 
             candidates.append({
                 "start": start,
                 "end": end,
-                "score": speech_score + keyword_score * 12
+                "score": score
             })
 
         start += 5
@@ -149,6 +184,10 @@ def select_best_clips(segments, video_duration, clip_length):
 
     return selected
 
+
+# -------------------------
+# CAPTIONS
+# -------------------------
 
 def srt_time(seconds):
 
@@ -203,12 +242,20 @@ def create_srt(segments, start, end, output_path):
     )
 
 
+# -------------------------
+# JOB STATUS
+# -------------------------
+
 def update_job(job_id, **values):
 
     with JOB_LOCK:
         if job_id in JOBS:
             JOBS[job_id].update(values)
 
+
+# -------------------------
+# VIDEO PROCESSING
+# -------------------------
 
 def process_video(job_id, filename, clip_length):
 
@@ -230,7 +277,7 @@ def process_video(job_id, filename, clip_length):
 
         if video_duration < clip_length:
             raise ValueError(
-                f"Please upload a video of at least {clip_length} seconds."
+                f"Video must be at least {clip_length} seconds long."
             )
 
         update_job(
@@ -256,6 +303,7 @@ def process_video(job_id, filename, clip_length):
         segments = []
 
         for segment in transcription:
+
             segments.append({
                 "start": float(segment.start),
                 "end": float(segment.end),
@@ -359,30 +407,29 @@ def process_video(job_id, filename, clip_length):
         )
 
 
-@app.route("/")
-def home():
+# -------------------------
+# HOME API
+# -------------------------
+
+@app.route("/api")
+def api_home():
 
     return jsonify({
         "app": "AI Shorts Maker",
         "status": "running",
-        "version": "3.0"
+        "version": "4.0"
     })
 
 
-@app.route("/health")
-def health():
-
-    return jsonify({
-        "status": "healthy"
-    })
-
+# -------------------------
+# UPLOAD VIDEO
+# -------------------------
 
 @app.route("/upload", methods=["POST"])
 def upload_video():
 
     if "video" not in request.files:
         return jsonify({
-            "error": "Video file missing",
             "message": "Video file missing"
         }), 400
 
@@ -390,7 +437,6 @@ def upload_video():
 
     if not video.filename:
         return jsonify({
-            "error": "Filename missing",
             "message": "Filename missing"
         }), 400
 
@@ -403,7 +449,6 @@ def upload_video():
 
     if extension not in allowed:
         return jsonify({
-            "error": "Unsupported video format",
             "message": "Unsupported video format"
         }), 400
 
@@ -416,6 +461,10 @@ def upload_video():
         "filename": filename
     })
 
+
+# -------------------------
+# START PROCESSING
+# -------------------------
 
 @app.route("/process", methods=["POST"])
 def start_processing():
@@ -451,6 +500,7 @@ def start_processing():
     job_id = uuid.uuid4().hex
 
     with JOB_LOCK:
+
         JOBS[job_id] = {
             "status": "queued",
             "progress": 0,
@@ -473,10 +523,15 @@ def start_processing():
     }), 202
 
 
+# -------------------------
+# CHECK STATUS
+# -------------------------
+
 @app.route("/status/<job_id>")
 def processing_status(job_id):
 
     with JOB_LOCK:
+
         job = JOBS.get(job_id)
 
         if job is None:
@@ -487,7 +542,10 @@ def processing_status(job_id):
         return jsonify(job)
 
 
-# Video preview
+# -------------------------
+# VIDEO PREVIEW
+# -------------------------
+
 @app.route("/media/<job_id>/<filename>")
 def preview_video(job_id, filename):
 
@@ -513,7 +571,10 @@ def preview_video(job_id, filename):
     )
 
 
-# Download video or captions
+# -------------------------
+# DOWNLOAD
+# -------------------------
+
 @app.route("/download/<job_id>/<filename>")
 def download_clip(job_id, filename):
 
@@ -538,6 +599,10 @@ def download_clip(job_id, filename):
         as_attachment=True
     )
 
+
+# -------------------------
+# RUN SERVER
+# -------------------------
 
 if __name__ == "__main__":
 
