@@ -1,3 +1,4 @@
+
 import subprocess
 from pathlib import Path
 
@@ -7,10 +8,13 @@ from faster_whisper import WhisperModel
 MODEL = None
 
 
-def get_model():
+def get_model(progress_callback=None):
     global MODEL
 
     if MODEL is None:
+        if progress_callback:
+            progress_callback(10, "Loading AI speech model...")
+
         MODEL = WhisperModel(
             "tiny",
             device="cpu",
@@ -44,10 +48,12 @@ def process_video(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    update(10, "Loading AI speech model...")
+    # Load AI model
+    update(5, "Preparing AI model...")
 
-    model = get_model()
+    model = get_model(update)
 
+    # Analyze video speech
     update(15, "AI is analyzing your video...")
 
     segments, info = model.transcribe(
@@ -55,14 +61,36 @@ def process_video(
         vad_filter=True
     )
 
-    transcript = list(segments)
+    transcript = []
+    duration = info.duration or 0
+
+    for segment in segments:
+        transcript.append(segment)
+
+        if duration > 0:
+            progress = 15 + int(
+                min(segment.end / duration, 1) * 35
+            )
+
+            update(
+                min(progress, 50),
+                "AI is analyzing your video..."
+            )
 
     if not transcript:
-        raise ValueError("No speech detected in video.")
+        raise ValueError(
+            "No speech detected in video. Please try a video with speech."
+        )
 
-    duration = info.duration
+    duration = duration or transcript[-1].end
+
+    if duration <= 0:
+        raise ValueError("Could not determine video duration.")
+
+    update(50, "AI analysis completed. Finding clips...")
+
+    # Find interesting video windows
     clip_length = 30
-    windows = []
 
     keywords = [
         "wow", "amazing", "secret",
@@ -70,8 +98,7 @@ def process_video(
         "how", "incredible", "never"
     ]
 
-    update(55, "AI analysis completed. Creating clips...")
-
+    windows = []
     start = 0
 
     while start < duration:
@@ -114,6 +141,7 @@ def process_video(
     if not windows:
         raise ValueError("No suitable clips found.")
 
+    # Prepare FFmpeg
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
 
     formats = {
@@ -123,18 +151,23 @@ def process_video(
     }
 
     if video_format not in formats:
-        raise ValueError("Unsupported video format")
+        raise ValueError("Unsupported output format.")
 
     width, height = formats[video_format].split(":")
 
     results = []
     selected_windows = windows[:3]
 
+    # Create video clips
     for index, (_, start, end, selected) in enumerate(
         selected_windows, start=1
     ):
+        progress = 55 + int(
+            (index - 1) / len(selected_windows) * 40
+        )
+
         update(
-            55 + int((index - 1) / len(selected_windows) * 40),
+            progress,
             f"Creating AI Short {index} of {len(selected_windows)}..."
         )
 
@@ -165,7 +198,8 @@ def process_video(
         result = subprocess.run(
             command,
             capture_output=True,
-            text=True
+            text=True,
+            timeout=600
         )
 
         if result.returncode != 0:
@@ -173,6 +207,7 @@ def process_video(
                 "FFmpeg error: " + result.stderr[-2000:]
             )
 
+        # Create subtitles
         subtitles = []
 
         for segment in selected:
