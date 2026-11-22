@@ -16,9 +16,12 @@ app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024
 
 BASE = Path(__file__).resolve().parent
+
+STATIC_FOLDER = BASE / "static"
 UPLOAD_FOLDER = BASE / "uploads"
 OUTPUT_FOLDER = BASE / "outputs"
 
+STATIC_FOLDER.mkdir(exist_ok=True)
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 OUTPUT_FOLDER.mkdir(exist_ok=True)
 
@@ -35,19 +38,24 @@ JOB_LOCK = threading.Lock()
 
 @app.route("/")
 def home():
-    return send_from_directory(BASE, "index.html")
+    return send_from_directory(STATIC_FOLDER, "index.html")
 
 
 @app.route("/script.js")
 def javascript():
-    return send_from_directory(BASE, "script.js")
+    return send_from_directory(STATIC_FOLDER, "script.js")
+
+
+@app.route("/static/<path:filename>")
+def static_files(filename):
+    return send_from_directory(STATIC_FOLDER, filename)
 
 
 @app.route("/health")
 def health():
     return jsonify({
         "status": "healthy",
-        "version": "4.0"
+        "version": "4.1"
     })
 
 
@@ -82,7 +90,6 @@ def run_ffmpeg(args):
 
 
 def get_video_duration(path):
-
     result = run_ffmpeg(["-i", str(path)])
 
     match = re.search(
@@ -417,7 +424,7 @@ def api_home():
     return jsonify({
         "app": "AI Shorts Maker",
         "status": "running",
-        "version": "4.0"
+        "version": "4.1"
     })
 
 
