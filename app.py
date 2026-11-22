@@ -9,10 +9,7 @@ from pathlib import Path
 import imageio_ffmpeg
 from faster_whisper import WhisperModel
 
-from flask import (
-    Flask, request, jsonify,
-    send_from_directory
-)
+from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__)
 
@@ -74,30 +71,27 @@ def get_video_duration(path):
     )
 
 
-def select_best_clips(segments, duration):
+def select_best_clips(segments, video_duration, clip_length):
 
-    clip_length = min(45, duration)
-
-    if clip_length < 30:
+    if video_duration < clip_length:
         raise ValueError(
-            "Video must be at least 30 seconds long"
+            f"Video must be at least {clip_length} seconds long."
         )
+
+    candidates = []
+
+    last_start = video_duration - clip_length
+    start = 0
 
     keywords = [
         "important", "secret", "amazing",
         "surprising", "why", "how",
         "best", "never", "because",
-        "but", "however", "finally",
-        "secret", "important"
+        "but", "however", "finally"
     ]
 
-    candidates = []
-
-    last_start = max(0, duration - clip_length)
-
-    start = 0
-
     while start <= last_start:
+
         end = start + clip_length
 
         relevant = [
@@ -109,21 +103,20 @@ def select_best_clips(segments, duration):
         words = text.split()
 
         if len(words) >= 10:
+
             lower_text = text.lower()
 
             keyword_score = sum(
-                1 for word in keywords
-                if word in lower_text
+                lower_text.count(word)
+                for word in keywords
             )
 
             speech_score = min(len(words), 250)
 
-            score = speech_score + keyword_score * 12
-
             candidates.append({
                 "start": start,
                 "end": end,
-                "score": score
+                "score": speech_score + keyword_score * 12
             })
 
         start += 5
@@ -146,13 +139,13 @@ def select_best_clips(segments, duration):
         if not overlaps:
             selected.append(candidate)
 
-        if len(selected) == 6:
+        if len(selected) >= 6:
             break
 
     selected.sort(key=lambda x: x["start"])
 
     if not selected:
-        raise ValueError("No suitable clips found")
+        raise ValueError("No suitable clips found.")
 
     return selected
 
@@ -213,10 +206,11 @@ def create_srt(segments, start, end, output_path):
 def update_job(job_id, **values):
 
     with JOB_LOCK:
-        JOBS[job_id].update(values)
+        if job_id in JOBS:
+            JOBS[job_id].update(values)
 
 
-def process_video(job_id, filename):
+def process_video(job_id, filename, clip_length):
 
     try:
 
@@ -232,7 +226,12 @@ def process_video(job_id, filename):
             message="Reading video..."
         )
 
-        duration = get_video_duration(video_path)
+        video_duration = get_video_duration(video_path)
+
+        if video_duration < clip_length:
+            raise ValueError(
+                f"Please upload a video of at least {clip_length} seconds."
+            )
 
         update_job(
             job_id,
@@ -264,7 +263,7 @@ def process_video(job_id, filename):
             })
 
         if not segments:
-            raise ValueError("No speech detected in video")
+            raise ValueError("No speech detected in video.")
 
         update_job(
             job_id,
@@ -274,7 +273,8 @@ def process_video(job_id, filename):
 
         clips = select_best_clips(
             segments,
-            duration
+            video_duration,
+            clip_length
         )
 
         results = []
@@ -307,13 +307,14 @@ def process_video(job_id, filename):
                 "-y",
                 "-ss", str(start),
                 "-i", str(video_path),
-                "-t", str(end - start),
+                "-t", str(clip_length),
                 "-vf",
                 "scale=1080:1920:force_original_aspect_ratio=increase,"
                 "crop=1080:1920,setsar=1",
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
                 "-crf", "28",
+                "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 "-b:a", "128k",
                 "-movflags", "+faststart",
@@ -332,9 +333,11 @@ def process_video(job_id, filename):
                 "clip": index,
                 "video": mp4_name,
                 "captions": srt_name,
+                "video_url": f"/media/{job_id}/{mp4_name}",
+                "captions_url": f"/download/{job_id}/{srt_name}",
                 "start": round(start, 2),
                 "end": round(end, 2),
-                "duration": round(end - start, 2)
+                "duration": clip_length
             })
 
         update_job(
@@ -342,7 +345,7 @@ def process_video(job_id, filename):
             status="completed",
             progress=100,
             message="All clips created successfully!",
-            clips=results,
+            shorts=results,
             language=info.language
         )
 
@@ -351,6 +354,7 @@ def process_video(job_id, filename):
         update_job(
             job_id,
             status="failed",
+            progress=0,
             message=str(error)
         )
 
@@ -361,7 +365,7 @@ def home():
     return jsonify({
         "app": "AI Shorts Maker",
         "status": "running",
-        "version": "2.0"
+        "version": "3.0"
     })
 
 
@@ -378,14 +382,16 @@ def upload_video():
 
     if "video" not in request.files:
         return jsonify({
-            "error": "Video file missing"
+            "error": "Video file missing",
+            "message": "Video file missing"
         }), 400
 
     video = request.files["video"]
 
     if not video.filename:
         return jsonify({
-            "error": "Filename missing"
+            "error": "Filename missing",
+            "message": "Filename missing"
         }), 400
 
     extension = Path(video.filename).suffix.lower()
@@ -397,7 +403,8 @@ def upload_video():
 
     if extension not in allowed:
         return jsonify({
-            "error": "Unsupported video format"
+            "error": "Unsupported video format",
+            "message": "Unsupported video format"
         }), 400
 
     filename = f"{uuid.uuid4().hex}{extension}"
@@ -417,16 +424,28 @@ def start_processing():
 
     filename = data.get("filename", "")
 
+    try:
+        duration = int(data.get("duration", 30))
+    except (ValueError, TypeError):
+        return jsonify({
+            "message": "Invalid duration"
+        }), 400
+
+    if duration not in [30, 60]:
+        return jsonify({
+            "message": "Duration must be 30 or 60 seconds"
+        }), 400
+
     if not filename or Path(filename).name != filename:
         return jsonify({
-            "error": "Invalid filename"
+            "message": "Invalid filename"
         }), 400
 
     video_path = UPLOAD_FOLDER / filename
 
     if not video_path.is_file():
         return jsonify({
-            "error": "Uploaded video not found"
+            "message": "Uploaded video not found"
         }), 404
 
     job_id = uuid.uuid4().hex
@@ -436,12 +455,12 @@ def start_processing():
             "status": "queued",
             "progress": 0,
             "message": "Waiting for processing...",
-            "clips": []
+            "shorts": []
         }
 
     thread = threading.Thread(
         target=process_video,
-        args=(job_id, filename),
+        args=(job_id, filename, duration),
         daemon=True
     )
 
@@ -460,14 +479,41 @@ def processing_status(job_id):
     with JOB_LOCK:
         job = JOBS.get(job_id)
 
-    if job is None:
+        if job is None:
+            return jsonify({
+                "message": "Job not found"
+            }), 404
+
+        return jsonify(job)
+
+
+# Video preview
+@app.route("/media/<job_id>/<filename>")
+def preview_video(job_id, filename):
+
+    if (
+        Path(job_id).name != job_id
+        or Path(filename).name != filename
+    ):
         return jsonify({
-            "error": "Job not found"
+            "message": "Invalid path"
+        }), 400
+
+    folder = OUTPUT_FOLDER / job_id
+
+    if not folder.is_dir():
+        return jsonify({
+            "message": "Job not found"
         }), 404
 
-    return jsonify(job)
+    return send_from_directory(
+        folder,
+        filename,
+        as_attachment=False
+    )
 
 
+# Download video or captions
 @app.route("/download/<job_id>/<filename>")
 def download_clip(job_id, filename):
 
@@ -475,12 +521,16 @@ def download_clip(job_id, filename):
         Path(job_id).name != job_id
         or Path(filename).name != filename
     ):
-        return jsonify({"error": "Invalid path"}), 400
+        return jsonify({
+            "message": "Invalid path"
+        }), 400
 
     folder = OUTPUT_FOLDER / job_id
 
     if not folder.is_dir():
-        return jsonify({"error": "Job not found"}), 404
+        return jsonify({
+            "message": "Job not found"
+        }), 404
 
     return send_from_directory(
         folder,
