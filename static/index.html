@@ -1,101 +1,73 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AI Shorts Maker</title>
 <style>
-*{box-sizing:border-box}
-body{margin:0;background:#0b1020;color:#fff;font-family:Arial,sans-serif}
-.container{max-width:800px;margin:auto;padding:24px}
-.card{background:#151d32;border:1px solid #293450;border-radius:18px;padding:22px;margin-top:20px}
-h1{font-size:32px;margin-bottom:8px}
-p{color:#aab6d0}
-.logo{color:#67e8b5}
-input,select,button{width:100%;padding:14px;margin-top:12px;border-radius:10px;border:1px solid #34415c;background:#202b43;color:white}
-button{background:#18a878;border:0;font-weight:bold;font-size:16px;cursor:pointer}
-button:hover{background:#11976b}
-video{width:100%;margin-top:15px;border-radius:12px}
-.status{margin-top:15px;color:#67e8b5}
+* { box-sizing: border-box; }
+body {
+  background: #0b1020;
+  color: white;
+  font-family: Arial, sans-serif;
+  padding: 20px;
+}
+.container {
+  max-width: 650px;
+  margin: 30px auto;
+  padding: 25px;
+  background: #151d32;
+  border-radius: 18px;
+}
+h1 { color: #67e8b5; }
+input, select, button {
+  width: 100%;
+  padding: 14px;
+  margin-top: 15px;
+  border-radius: 10px;
+}
+input, select {
+  background: #202b43;
+  color: white;
+}
+button {
+  background: #18a878;
+  color: white;
+  border: none;
+  font-weight: bold;
+  cursor: pointer;
+}
+button:disabled { opacity: .6; }
+#status { margin-top: 20px; overflow-wrap: anywhere; }
+video { width: 100%; margin-top: 15px; }
 </style>
 </head>
 <body>
+
 <div class="container">
-<h1><span class="logo">AI</span> Shorts Maker</h1>
-<p>Turn long videos into viral short clips with AI.</p>
+<h1>AI Shorts Maker 🎬</h1>
+<p>Turn long videos into short clips with AI.</p>
 
-<div class="card">
-<h2>Upload your video</h2>
-<input type="file" id="videoFile" accept="video/*">
-<video id="preview" controls style="display:none"></video>
+<form id="uploadForm">
 
-<label>Short clip duration</label>
-<select id="duration">
-<option value="30">30 seconds</option>
-<option value="45">45 seconds</option>
-<option value="60">60 seconds</option>
-<option value="90">90 seconds</option>
-</select>
+<label>Select Video</label>
+<input type="file" id="videoFile"
+accept="video/*" required>
 
-<label>Aspect ratio</label>
-<select id="ratio">
+<label>Aspect Ratio</label>
+<select id="format">
 <option value="9:16">Vertical 9:16</option>
-<option value="1:1">Square 1:1</option>
 <option value="16:9">Landscape 16:9</option>
+<option value="1:1">Square 1:1</option>
 </select>
 
-<button id="makeBtn" onclick="makeClips()">Create AI Shorts</button>
-<div class="status" id="status"></div>
+<button type="submit">🚀 Create AI Shorts</button>
+
+</form>
+
+<div id="status"></div>
 </div>
-</div>
 
-<script>
-const fileInput=document.getElementById('videoFile');
-const preview=document.getElementById('preview');
-const statusBox=document.getElementById('status');
-
-fileInput.addEventListener('change',()=>{
-const file=fileInput.files[0];
-if(file){
-preview.src=URL.createObjectURL(file);
-preview.style.display='block';
-statusBox.textContent='Video ready to upload!';
-}
-});
-
-async function makeClips(){
-const file=fileInput.files[0];
-if(!file){
-statusBox.textContent='Please select a video first.';
-return;
-}
-
-const btn=document.getElementById('makeBtn');
-btn.disabled=true;
-statusBox.textContent='Uploading video...';
-
-const formData=new FormData();
-formData.append('video',file);
-formData.append('duration',document.getElementById('duration').value);
-formData.append('ratio',document.getElementById('ratio').value);
-
-try{
-const response=await fetch('/process',{
-method:'POST',
-body:formData
-});
-
-if(!response.ok)throw new Error('Server error');
-const data=await response.json();
-statusBox.textContent=data.message||'Processing complete!';
-}catch(error){
-statusBox.textContent='Upload UI is ready, but backend processing needs to be connected.';
-}
-finally{
-btn.disabled=false;
-}
-}
-</script>
+<script src="/static/script.js?v=2"></script>
 </body>
 </html>
