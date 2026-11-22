@@ -1,3 +1,4 @@
+
 const form = document.getElementById("uploadForm");
 const videoInput = document.getElementById("videoFile");
 const formatInput = document.getElementById("format");
@@ -5,17 +6,57 @@ const statusText = document.getElementById("status");
 
 const resultsBox = document.createElement("div");
 resultsBox.id = "results";
+resultsBox.style.marginTop = "30px";
 form.after(resultsBox);
 
+// Video file information
+const fileInfo = document.createElement("div");
+fileInfo.style.cssText = `
+  margin-top:12px;
+  color:#a78bfa;
+  font-size:14px;
+  line-height:1.6;
+`;
+videoInput.after(fileInfo);
+
+videoInput.addEventListener("change", function() {
+    const file = videoInput.files[0];
+
+    if (!file) {
+        fileInfo.textContent = "";
+        return;
+    }
+
+    const size = (file.size / (1024 * 1024)).toFixed(2);
+
+    fileInfo.textContent =
+        "Selected: " + file.name + " • " + size + " MB";
+});
+
+// Progress UI
 const progressBox = document.createElement("div");
+
 progressBox.innerHTML = `
-  <div id="progressText" style="margin-top:20px">
-    Ready
+  <div id="progressText"
+       style="margin-top:20px;color:#c4b5fd;font-size:14px">
+    Ready to create
   </div>
-  <div style="background:#34415c;height:14px;border-radius:20px;overflow:hidden;margin-top:10px">
-    <div id="progressBar" style="width:0%;height:100%;background:#18a878;transition:width .3s"></div>
+
+  <div style="
+    background:#29293b;
+    height:12px;
+    border-radius:20px;
+    overflow:hidden;
+    margin-top:10px">
+    <div id="progressBar" style="
+      width:0%;
+      height:100%;
+      background:linear-gradient(90deg,#8b5cf6,#67e8b5);
+      transition:width .3s">
+    </div>
   </div>
 `;
+
 statusText.after(progressBox);
 
 const progressBar = document.getElementById("progressBar");
@@ -25,7 +66,7 @@ function showProgress(value, message) {
     const percent = Math.max(0, Math.min(100, value));
 
     progressBar.style.width = percent + "%";
-    progressText.textContent = percent + "% - " + message;
+    progressText.textContent = percent + "% • " + message;
 }
 
 function sleep(ms) {
@@ -37,7 +78,7 @@ function parseResponse(text) {
         return JSON.parse(text);
     } catch {
         throw new Error(
-            "Server returned an empty or invalid response. Please check Render Logs."
+            "Invalid server response. Please check Render logs."
         );
     }
 }
@@ -59,7 +100,14 @@ function uploadFile(formData) {
         };
 
         xhr.onload = function() {
-            const result = parseResponse(xhr.responseText);
+            let result;
+
+            try {
+                result = parseResponse(xhr.responseText);
+            } catch (error) {
+                reject(error);
+                return;
+            }
 
             if (xhr.status < 200 || xhr.status >= 300) {
                 reject(new Error(result.detail || "Upload failed"));
@@ -89,7 +137,10 @@ async function checkJob(jobId) {
             throw new Error(result.detail || "Status check failed");
         }
 
-        showProgress(result.progress, result.message);
+        showProgress(
+            result.progress || 0,
+            result.message || "Processing..."
+        );
 
         if (result.status === "completed") {
             return result;
@@ -103,6 +154,34 @@ async function checkJob(jobId) {
     }
 }
 
+function createLink(url, text, downloadName) {
+    if (!url) return null;
+
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.textContent = text;
+
+    if (downloadName) {
+        link.download = downloadName;
+    }
+
+    link.style.cssText = `
+      display:inline-block;
+      margin-top:12px;
+      margin-right:10px;
+      padding:12px 16px;
+      background:#28243d;
+      color:#c4b5fd;
+      text-decoration:none;
+      border-radius:10px;
+      font-weight:bold;
+      font-size:14px;
+    `;
+
+    return link;
+}
+
 function showResults(shorts) {
     resultsBox.replaceChildren();
 
@@ -112,43 +191,70 @@ function showResults(shorts) {
     }
 
     const heading = document.createElement("h2");
-    heading.textContent = "Your AI Shorts 🎬";
+
+    heading.textContent = "✦ Your AI Shorts";
+    heading.style.cssText = `
+      margin-bottom:20px;
+      font-size:24px;
+    `;
+
     resultsBox.appendChild(heading);
 
     shorts.forEach((short, index) => {
         const card = document.createElement("div");
 
-        card.style.padding = "15px";
-        card.style.margin = "15px 0";
-        card.style.background = "#252f48";
-        card.style.borderRadius = "12px";
+        card.style.cssText = `
+          padding:20px;
+          margin:18px 0;
+          background:#13131d;
+          border:1px solid #29293b;
+          border-radius:18px;
+        `;
 
         const title = document.createElement("h3");
-        title.textContent = "Short Video " + (index + 1);
 
-        const video = document.createElement("video");
-        video.src = short.video_url;
-        video.controls = true;
-        video.playsInline = true;
-        video.style.width = "100%";
-        video.style.maxWidth = "300px";
+        title.textContent = "🎬 Short Video " + (index + 1);
 
-        const download = document.createElement("a");
-        download.href = short.video_url;
-        download.download = short.video;
-        download.textContent = "⬇ Download Short Video";
+        title.style.marginBottom = "15px";
 
-        const captions = document.createElement("a");
-        captions.href = short.captions_url;
-        captions.download = short.captions;
-        captions.textContent = "⬇ Download Captions";
+        card.appendChild(title);
 
-        download.style.display = "block";
-        captions.style.display = "block";
-        download.style.marginTop = "12px";
-        captions.style.marginTop = "10px";
+        if (short.video_url) {
+            const video = document.createElement("video");
 
-        card.append(title, video, download, captions);
+            video.src = short.video_url;
+            video.controls = true;
+            video.playsInline = true;
+
+            video.style.cssText = `
+              width:100%;
+              max-width:350px;
+              display:block;
+              border-radius:14px;
+              background:#000;
+            `;
+
+            card.appendChild(video);
+
+            const download = createLink(
+                short.video_url,
+                "⬇ Download Short",
+                short.video
+            );
+
+            if (download) card.appendChild(download);
+        }
+
+        if (short.captions_url) {
+            const captions = createLink(
+                short.captions_url,
+                "⬇ Download Captions",
+                short.captions
+            );
+
+            if (captions) card.appendChild(captions);
+        }
+
         resultsBox.appendChild(card);
     });
 }
@@ -164,17 +270,20 @@ form.addEventListener("submit", async function(event) {
     }
 
     const formData = new FormData();
+
     formData.append("file", file);
     formData.append("format", formatInput.value);
 
     resultsBox.replaceChildren();
 
     const button = form.querySelector("button");
+
     button.disabled = true;
-    button.textContent = "AI Processing...";
+    button.textContent = "✦ AI Processing...";
 
     try {
         statusText.textContent = "Uploading your video...";
+
         showProgress(0, "Starting upload...");
 
         const uploadResult = await uploadFile(formData);
@@ -188,15 +297,17 @@ form.addEventListener("submit", async function(event) {
 
         const result = await checkJob(uploadResult.job_id);
 
-        statusText.textContent = result.message;
+        statusText.textContent = "Your Shorts are ready!";
+
         showProgress(100, "Completed!");
 
         showResults(result.shorts);
 
     } catch (error) {
         statusText.textContent = "Error: " + error.message;
+
     } finally {
         button.disabled = false;
-        button.textContent = "🚀 Generate AI Shorts";
+        button.textContent = "✦ Generate AI Shorts";
     }
 });
