@@ -13,12 +13,14 @@ def get_model(progress_callback=None):
 
     if MODEL is None:
         if progress_callback:
-            progress_callback(10, "Loading AI speech model...")
+            progress_callback(8, "Loading AI speech model...")
 
         MODEL = WhisperModel(
             "tiny",
             device="cpu",
-            compute_type="int8"
+            compute_type="int8",
+            cpu_threads=2,
+            num_workers=1
         )
 
     return MODEL
@@ -48,17 +50,16 @@ def process_video(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load AI model
     update(5, "Preparing AI model...")
 
     model = get_model(update)
 
-    # Analyze video speech
     update(15, "AI is analyzing your video...")
 
     segments, info = model.transcribe(
         str(video_path),
-        vad_filter=True
+        vad_filter=True,
+        beam_size=1
     )
 
     transcript = []
@@ -79,7 +80,7 @@ def process_video(
 
     if not transcript:
         raise ValueError(
-            "No speech detected in video. Please try a video with speech."
+            "No speech detected. Try a video with clear speech."
         )
 
     duration = duration or transcript[-1].end
@@ -89,7 +90,6 @@ def process_video(
 
     update(50, "AI analysis completed. Finding clips...")
 
-    # Find interesting video windows
     clip_length = 30
 
     keywords = [
@@ -141,7 +141,6 @@ def process_video(
     if not windows:
         raise ValueError("No suitable clips found.")
 
-    # Prepare FFmpeg
     ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
 
     formats = {
@@ -158,7 +157,6 @@ def process_video(
     results = []
     selected_windows = windows[:3]
 
-    # Create video clips
     for index, (_, start, end, selected) in enumerate(
         selected_windows, start=1
     ):
@@ -207,7 +205,6 @@ def process_video(
                 "FFmpeg error: " + result.stderr[-2000:]
             )
 
-        # Create subtitles
         subtitles = []
 
         for segment in selected:
