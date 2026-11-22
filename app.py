@@ -9,10 +9,7 @@ from pathlib import Path
 import imageio_ffmpeg
 from faster_whisper import WhisperModel
 
-from flask import (
-    Flask, request, jsonify,
-    send_from_directory
-)
+from flask import Flask, request, jsonify, send_from_directory
 
 app = Flask(__name__)
 
@@ -30,6 +27,14 @@ FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
 MODEL = None
 JOBS = {}
 JOB_LOCK = threading.Lock()
+
+MAX_SHORTS = 6
+
+FORMATS = {
+    "9:16": (1080, 1920),
+    "16:9": (1920, 1080),
+    "1:1": (1080, 1080)
+}
 
 
 def get_model():
@@ -74,27 +79,24 @@ def get_video_duration(path):
     )
 
 
-def select_best_clips(segments, duration):
+def select_best_clips(segments, video_duration, clip_length):
 
-    clip_length = min(45, duration)
-
-    if clip_length < 30:
+    if video_duration < clip_length:
         raise ValueError(
-            "Video must be at least 30 seconds long"
+            f"Video must be at least {clip_length} seconds long"
         )
 
     keywords = [
         "important", "secret", "amazing",
         "surprising", "why", "how",
         "best", "never", "because",
-        "but", "however", "finally",
-        "secret", "important"
+        "however", "finally", "interesting",
+        "incredible", "remember", "actually"
     ]
 
     candidates = []
 
-    last_start = max(0, duration - clip_length)
-
+    last_start = video_duration - clip_length
     start = 0
 
     while start <= last_start:
@@ -146,13 +148,15 @@ def select_best_clips(segments, duration):
         if not overlaps:
             selected.append(candidate)
 
-        if len(selected) == 6:
+        if len(selected) >= MAX_SHORTS:
             break
 
     selected.sort(key=lambda x: x["start"])
 
     if not selected:
-        raise ValueError("No suitable clips found")
+        raise ValueError(
+            "No suitable clips found. Try a video with more speech."
+        )
 
     return selected
 
@@ -190,7 +194,10 @@ def create_srt(segments, start, end, output_path):
             continue
 
         clip_start = max(0, segment["start"] - start)
-        clip_end = min(end - start, segment["end"] - start)
+        clip_end = min(
+            end - start,
+            segment["end"] - start
+        )
 
         if clip_end <= clip_start:
             continue
@@ -213,10 +220,11 @@ def create_srt(segments, start, end, output_path):
 def update_job(job_id, **values):
 
     with JOB_LOCK:
-        JOBS[job_id].update(values)
+        if job_id in JOBS:
+            JOBS[job_id].update(values)
 
 
-def process_video(job_id, filename):
+def process_video(job_id, filename, clip_length, video_format):
 
     try:
 
@@ -233,6 +241,11 @@ def process_video(job_id, filename):
         )
 
         duration = get_video_duration(video_path)
+
+        if duration < clip_length:
+            raise ValueError(
+                f"Video must be at least {clip_length} seconds long"
+            )
 
         update_job(
             job_id,
@@ -268,14 +281,17 @@ def process_video(job_id, filename):
 
         update_job(
             job_id,
-            progress=60,
+            progress=55,
             message="Finding the best moments..."
         )
 
         clips = select_best_clips(
             segments,
-            duration
+            duration,
+            clip_length
         )
+
+        width, height = FORMATS[video_format]
 
         results = []
 
@@ -292,8 +308,10 @@ def process_video(job_id, filename):
 
             update_job(
                 job_id,
-                progress=60 + int(index / len(clips) * 35),
-                message=f"Creating clip {index} of {len(clips)}..."
+                progress=55 + int(
+                    index / len(clips) * 40
+                ),
+                message=f"Creating Short {index} of {len(clips)}..."
             )
 
             create_srt(
@@ -303,14 +321,18 @@ def process_video(job_id, filename):
                 srt_path
             )
 
+            video_filter = (
+                f"scale={width}:{height}:"
+                "force_original_aspect_ratio=increase,"
+                f"crop={width}:{height},setsar=1"
+            )
+
             command = [
                 "-y",
                 "-ss", str(start),
                 "-i", str(video_path),
                 "-t", str(end - start),
-                "-vf",
-                "scale=1080:1920:force_original_aspect_ratio=increase,"
-                "crop=1080:1920,setsar=1",
+                "-vf", video_filter,
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
                 "-crf", "28",
@@ -332,6 +354,8 @@ def process_video(job_id, filename):
                 "clip": index,
                 "video": mp4_name,
                 "captions": srt_name,
+                "video_url": f"/download/{job_id}/{mp4_name}",
+                "captions_url": f"/download/{job_id}/{srt_name}",
                 "start": round(start, 2),
                 "end": round(end, 2),
                 "duration": round(end - start, 2)
@@ -343,6 +367,7 @@ def process_video(job_id, filename):
             progress=100,
             message="All clips created successfully!",
             clips=results,
+            shorts=results,
             language=info.language
         )
 
@@ -351,26 +376,19 @@ def process_video(job_id, filename):
         update_job(
             job_id,
             status="failed",
+            progress=0,
             message=str(error)
         )
 
 
 @app.route("/")
 def home():
-
-    return jsonify({
-        "app": "AI Shorts Maker",
-        "status": "running",
-        "version": "2.0"
-    })
+    return send_from_directory(BASE, "index.html")
 
 
 @app.route("/health")
 def health():
-
-    return jsonify({
-        "status": "healthy"
-    })
+    return jsonify({"status": "healthy"})
 
 
 @app.route("/upload", methods=["POST"])
@@ -417,9 +435,31 @@ def start_processing():
 
     filename = data.get("filename", "")
 
-    if not filename or Path(filename).name != filename:
+    if (
+        not filename
+        or Path(filename).name != filename
+    ):
         return jsonify({
             "error": "Invalid filename"
+        }), 400
+
+    try:
+        clip_length = int(data.get("duration", 30))
+    except (TypeError, ValueError):
+        return jsonify({
+            "error": "Invalid duration"
+        }), 400
+
+    if clip_length not in (30, 60):
+        return jsonify({
+            "error": "Duration must be 30 or 60 seconds"
+        }), 400
+
+    video_format = data.get("format", "9:16")
+
+    if video_format not in FORMATS:
+        return jsonify({
+            "error": "Invalid video format"
         }), 400
 
     video_path = UPLOAD_FOLDER / filename
@@ -436,12 +476,19 @@ def start_processing():
             "status": "queued",
             "progress": 0,
             "message": "Waiting for processing...",
-            "clips": []
+            "clips": [],
+            "duration": clip_length,
+            "format": video_format
         }
 
     thread = threading.Thread(
         target=process_video,
-        args=(job_id, filename),
+        args=(
+            job_id,
+            filename,
+            clip_length,
+            video_format
+        ),
         daemon=True
     )
 
@@ -475,12 +522,16 @@ def download_clip(job_id, filename):
         Path(job_id).name != job_id
         or Path(filename).name != filename
     ):
-        return jsonify({"error": "Invalid path"}), 400
+        return jsonify({
+            "error": "Invalid path"
+        }), 400
 
     folder = OUTPUT_FOLDER / job_id
 
     if not folder.is_dir():
-        return jsonify({"error": "Job not found"}), 404
+        return jsonify({
+            "error": "Job not found"
+        }), 404
 
     return send_from_directory(
         folder,
