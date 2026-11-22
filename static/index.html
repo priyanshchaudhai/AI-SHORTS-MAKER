@@ -44,7 +44,7 @@ body {
 
 .main {
   max-width: 900px;
-  margin: 60px auto;
+  margin: 55px auto;
   padding: 20px;
 }
 
@@ -103,6 +103,58 @@ body {
   color: #9999ae;
   font-size: 14px;
   margin-bottom: 25px;
+}
+
+.source-box {
+  border: 1px solid #39304f;
+  background: #191827;
+  border-radius: 18px;
+  padding: 22px;
+  margin-bottom: 25px;
+}
+
+.source-box h3 {
+  font-size: 16px;
+  margin-bottom: 12px;
+}
+
+.youtube-input {
+  width: 100%;
+  padding: 15px;
+  background: #202033;
+  color: white;
+  border: 1px solid #39304f;
+  border-radius: 12px;
+  font-size: 14px;
+  outline: none;
+}
+
+.youtube-input:focus {
+  border-color: #a78bfa;
+}
+
+.source-note {
+  color: #9999ae;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 12px;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  color: #77778b;
+  font-size: 13px;
+  margin: 25px 0;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #29293b;
 }
 
 .upload-box {
@@ -187,7 +239,7 @@ button:disabled {
 }
 
 #status {
-  margin-top: 22px;
+  margin-top: 20px;
   overflow-wrap: anywhere;
   line-height: 1.7;
 }
@@ -256,6 +308,10 @@ video {
   .navbar {
     padding: 18px 5%;
   }
+
+  .nav-tag {
+    font-size: 11px;
+  }
 }
 </style>
 </head>
@@ -278,8 +334,8 @@ video {
   </h1>
 
   <p>
-    Find the best moments from your videos.
-    Create short, engaging clips ready for social media.
+    Find interesting moments from your videos.
+    Create short videos ready for social media.
   </p>
 </section>
 
@@ -288,16 +344,42 @@ video {
   <h2 class="card-title">Create your shorts</h2>
 
   <p class="card-desc">
-    Upload a video and let AI help you turn it into clips.
+    Upload a video or paste a video link.
   </p>
 
   <form id="uploadForm">
 
+    <!-- YouTube link section -->
+    <div class="source-box">
+
+      <h3>🔗 Import from YouTube</h3>
+
+      <input
+        type="url"
+        id="youtubeUrl"
+        class="youtube-input"
+        placeholder="Paste YouTube video link here..."
+      >
+
+      <p class="source-note">
+        Use videos you own or have permission to process.
+        YouTube link processing will be connected in a later update.
+      </p>
+
+    </div>
+
+    <div class="divider">OR UPLOAD A VIDEO</div>
+
+    <!-- Video upload -->
     <div class="upload-box">
+
       <div class="upload-icon">🎬</div>
+
       <h3>Upload your video</h3>
-      <p>Choose a video from your device</p>
-      <p>MP4, MOV and other supported video formats</p>
+
+      <p>Select a video from your device</p>
+
+      <p>MP4, MOV, MKV and other supported formats</p>
 
       <input
         type="file"
@@ -305,8 +387,10 @@ video {
         accept="video/*"
         required
       >
+
     </div>
 
+    <!-- Aspect ratio -->
     <label for="format">Video aspect ratio</label>
 
     <select id="format">
@@ -315,6 +399,7 @@ video {
       <option value="1:1">⬜ Square 1:1</option>
     </select>
 
+    <!-- Submit -->
     <button type="submit">
       ✦ Generate AI Shorts
     </button>
@@ -336,7 +421,7 @@ video {
   <div class="feature">
     <div class="feature-icon">📱</div>
     <h3>Vertical videos</h3>
-    <p>Choose the aspect ratio for your content.</p>
+    <p>Create clips in your preferred aspect ratio.</p>
   </div>
 
   <div class="feature">
@@ -353,7 +438,7 @@ video {
   AI Shorts Maker · Create smarter, share faster.
 </footer>
 
-<script src="/static/script.js?v=2"></script>
+<script src="/static/script.js?v=3"></script>
 
 </body>
 </html>
