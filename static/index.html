@@ -7,311 +7,146 @@
 <title>AI Shorts Maker</title>
 
 <style>
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+ background:#09090f;color:#f5f5f7;
+ font-family:Arial,sans-serif;min-height:100vh
 }
 
-body {
-  background: #09090f;
-  color: #f5f5f7;
-  font-family: Arial, sans-serif;
-  min-height: 100vh;
+.navbar{
+ padding:20px 6%;border-bottom:1px solid #252535;
+ display:flex;justify-content:space-between;align-items:center
 }
 
-.navbar {
-  padding: 20px 6%;
-  border-bottom: 1px solid #252535;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.logo{font-size:22px;font-weight:bold}
+.logo span{color:#a78bfa}
+.nav-tag{color:#b4b4c5;font-size:13px}
+
+.main{max-width:900px;margin:45px auto;padding:20px}
+
+.hero{text-align:center;margin-bottom:35px}
+.badge{
+ display:inline-block;padding:8px 14px;
+ border:1px solid #39304f;background:#1b1529;
+ color:#c4b5fd;border-radius:30px;font-size:13px;
+ margin-bottom:20px
 }
 
-.logo {
-  font-size: 22px;
-  font-weight: bold;
+.hero h1{
+ font-size:clamp(35px,6vw,60px);
+ line-height:1.15;margin-bottom:18px;letter-spacing:-2px
 }
 
-.logo span {
-  color: #a78bfa;
+.gradient{
+ background:linear-gradient(90deg,#a78bfa,#67e8b5);
+ -webkit-background-clip:text;background-clip:text;color:transparent
 }
 
-.nav-tag {
-  color: #b4b4c5;
-  font-size: 13px;
+.hero p{color:#a1a1b5;line-height:1.7}
+
+.card{
+ background:#13131d;border:1px solid #29293b;
+ border-radius:22px;padding:30px;
+ box-shadow:0 20px 70px rgba(0,0,0,.25)
 }
 
-.main {
-  max-width: 900px;
-  margin: 55px auto;
-  padding: 20px;
+.card-title{font-size:20px;margin-bottom:8px}
+.card-desc{color:#9999ae;font-size:14px;margin-bottom:25px}
+
+.section-label{
+ display:block;margin:22px 0 12px;
+ color:#d5d5e2;font-size:14px;font-weight:bold
 }
 
-.hero {
-  text-align: center;
-  margin-bottom: 40px;
+.duration-grid{
+ display:grid;grid-template-columns:1fr 1fr;gap:15px
 }
 
-.badge {
-  display: inline-block;
-  padding: 8px 14px;
-  border: 1px solid #39304f;
-  background: #1b1529;
-  color: #c4b5fd;
-  border-radius: 30px;
-  font-size: 13px;
-  margin-bottom: 20px;
+.duration-option{
+ border:2px solid #39304f;background:#191827;
+ border-radius:16px;padding:20px;text-align:center;
+ cursor:pointer;transition:.2s
 }
 
-.hero h1 {
-  font-size: clamp(35px, 6vw, 60px);
-  line-height: 1.15;
-  margin-bottom: 18px;
-  letter-spacing: -2px;
+.duration-option:has(input:checked){
+ border-color:#a78bfa;background:#251e3c
 }
 
-.gradient {
-  background: linear-gradient(90deg, #a78bfa, #67e8b5);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+.duration-option input{
+ accent-color:#a78bfa;width:18px;height:18px
 }
 
-.hero p {
-  color: #a1a1b5;
-  font-size: 16px;
-  line-height: 1.7;
-  max-width: 600px;
-  margin: auto;
+.duration-option h3{
+ color:#c4b5fd;font-size:27px;margin:10px 0
 }
 
-.card {
-  background: #13131d;
-  border: 1px solid #29293b;
-  border-radius: 22px;
-  padding: 30px;
-  box-shadow: 0 20px 70px rgba(0,0,0,.25);
+.duration-option p{color:#9999ae;font-size:12px}
+
+.upload-box{
+ border:2px dashed #45415c;background:#191827;
+ border-radius:18px;padding:30px 20px;text-align:center
 }
 
-.card-title {
-  font-size: 20px;
-  margin-bottom: 8px;
+.upload-icon{font-size:40px;margin-bottom:15px}
+.upload-box h3{font-size:17px;margin-bottom:10px}
+.upload-box p{font-size:13px;color:#9999ae;line-height:1.6}
+
+input[type=file]{
+ display:block;width:100%;margin-top:20px;
+ color:#c9c9d8;font-size:13px
 }
 
-.card-desc {
-  color: #9999ae;
-  font-size: 14px;
-  margin-bottom: 25px;
+select{
+ width:100%;padding:14px;border:1px solid #36364a;
+ border-radius:12px;background:#1c1c2b;color:white;font-size:15px
 }
 
-.source-box {
-  border: 1px solid #39304f;
-  background: #191827;
-  border-radius: 18px;
-  padding: 22px;
-  margin-bottom: 25px;
+button{
+ width:100%;margin-top:25px;padding:16px;
+ border:none;border-radius:13px;
+ background:linear-gradient(90deg,#8b5cf6,#6d5dfc);
+ color:white;font-size:16px;font-weight:bold;cursor:pointer
 }
 
-.source-box h3 {
-  font-size: 16px;
-  margin-bottom: 12px;
+button:disabled{opacity:.5;cursor:not-allowed}
+
+#status{margin-top:20px;overflow-wrap:anywhere;line-height:1.7}
+
+#results{margin-top:30px}
+
+.progress-track{
+ background:#29293b;height:12px;border-radius:20px;
+ overflow:hidden;margin-top:10px
 }
 
-.youtube-input {
-  width: 100%;
-  padding: 15px;
-  background: #202033;
-  color: white;
-  border: 1px solid #39304f;
-  border-radius: 12px;
-  font-size: 14px;
-  outline: none;
+#progressBar{
+ width:0;height:100%;
+ background:linear-gradient(90deg,#8b5cf6,#67e8b5);
+ transition:width .3s
 }
 
-.youtube-input:focus {
-  border-color: #a78bfa;
+.feature-grid{
+ display:grid;grid-template-columns:repeat(3,1fr);
+ gap:15px;margin-top:25px
 }
 
-.source-note {
-  color: #9999ae;
-  font-size: 12px;
-  line-height: 1.6;
-  margin-top: 12px;
+.feature{
+ background:#13131d;border:1px solid #29293b;
+ border-radius:16px;padding:20px
 }
 
-.divider {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  color: #77778b;
-  font-size: 13px;
-  margin: 25px 0;
-}
+.feature h3{font-size:14px;margin:10px 0}
+.feature p{font-size:12px;color:#9999ae;line-height:1.6}
 
-.divider::before,
-.divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: #29293b;
-}
+.footer{text-align:center;color:#77778b;padding:30px;font-size:13px}
 
-.upload-box {
-  border: 2px dashed #45415c;
-  background: #191827;
-  border-radius: 18px;
-  padding: 35px 20px;
-  text-align: center;
-  transition: .2s;
-}
-
-.upload-box:hover {
-  border-color: #a78bfa;
-  background: #201d31;
-}
-
-.upload-icon {
-  font-size: 40px;
-  margin-bottom: 15px;
-}
-
-.upload-box h3 {
-  font-size: 17px;
-  margin-bottom: 10px;
-}
-
-.upload-box p {
-  font-size: 13px;
-  color: #9999ae;
-  line-height: 1.6;
-}
-
-input[type="file"] {
-  display: block;
-  width: 100%;
-  margin-top: 20px;
-  color: #c9c9d8;
-  font-size: 13px;
-}
-
-label {
-  display: block;
-  margin-top: 22px;
-  margin-bottom: 10px;
-  color: #d5d5e2;
-  font-size: 14px;
-  font-weight: bold;
-}
-
-select {
-  width: 100%;
-  padding: 14px;
-  border: 1px solid #36364a;
-  border-radius: 12px;
-  background: #1c1c2b;
-  color: white;
-  font-size: 15px;
-}
-
-button {
-  width: 100%;
-  margin-top: 25px;
-  padding: 16px;
-  border: none;
-  border-radius: 13px;
-  background: linear-gradient(90deg, #8b5cf6, #6d5dfc);
-  color: white;
-  font-size: 16px;
-  font-weight: bold;
-  cursor: pointer;
-  transition: .2s;
-}
-
-button:hover {
-  opacity: .9;
-  transform: translateY(-1px);
-}
-
-button:disabled {
-  opacity: .5;
-  cursor: not-allowed;
-}
-
-#status {
-  margin-top: 20px;
-  overflow-wrap: anywhere;
-  line-height: 1.7;
-}
-
-video {
-  width: 100%;
-  margin-top: 20px;
-  border-radius: 15px;
-}
-
-.features {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 15px;
-  margin-top: 25px;
-}
-
-.feature {
-  background: #13131d;
-  border: 1px solid #29293b;
-  border-radius: 16px;
-  padding: 20px;
-}
-
-.feature-icon {
-  font-size: 25px;
-  margin-bottom: 12px;
-}
-
-.feature h3 {
-  font-size: 14px;
-  margin-bottom: 8px;
-}
-
-.feature p {
-  font-size: 12px;
-  color: #9999ae;
-  line-height: 1.6;
-}
-
-.footer {
-  text-align: center;
-  color: #77778b;
-  padding: 30px 10px;
-  font-size: 13px;
-}
-
-@media(max-width:600px) {
-  .main {
-    margin: 30px auto;
-    padding: 15px;
-  }
-
-  .card {
-    padding: 20px;
-  }
-
-  .features {
-    grid-template-columns: 1fr;
-  }
-
-  .hero h1 {
-    letter-spacing: -1px;
-  }
-
-  .navbar {
-    padding: 18px 5%;
-  }
-
-  .nav-tag {
-    font-size: 11px;
-  }
+@media(max-width:600px){
+ .main{margin:25px auto;padding:15px}
+ .card{padding:20px}
+ .feature-grid{grid-template-columns:1fr}
+ .navbar{padding:18px 5%}
+ .hero h1{letter-spacing:-1px}
 }
 </style>
 </head>
@@ -319,126 +154,107 @@ video {
 <body>
 
 <nav class="navbar">
-  <div class="logo">✦ AI <span>Shorts Maker</span></div>
-  <div class="nav-tag">AI Video Studio</div>
+ <div class="logo">✦ AI <span>Shorts Maker</span></div>
+ <div class="nav-tag">AI Video Studio</div>
 </nav>
 
 <main class="main">
 
 <section class="hero">
-  <div class="badge">✦ AI Powered Video Creation</div>
-
-  <h1>
-    Turn long videos into<br>
-    <span class="gradient">viral shorts.</span>
-  </h1>
-
-  <p>
-    Find interesting moments from your videos.
-    Create short videos ready for social media.
-  </p>
+ <div class="badge">✦ AI Powered Video Creation</div>
+ <h1>Turn long videos into<br>
+ <span class="gradient">viral shorts.</span></h1>
+ <p>Create multiple short videos automatically using AI.</p>
 </section>
 
 <section class="card">
 
-  <h2 class="card-title">Create your shorts</h2>
+<h2 class="card-title">Create your shorts</h2>
+<p class="card-desc">Choose duration and upload your video.</p>
 
-  <p class="card-desc">
-    Upload a video or paste a video link.
-  </p>
+<form id="uploadForm">
 
-  <form id="uploadForm">
+<label class="section-label">⏱ Select Shorts Duration</label>
 
-    <!-- YouTube link section -->
-    <div class="source-box">
+<div class="duration-grid">
 
-      <h3>🔗 Import from YouTube</h3>
+<label class="duration-option">
+ <input type="radio" name="duration" value="30" checked>
+ <h3>30 Sec</h3>
+ <p>Short videos</p>
+</label>
 
-      <input
-        type="url"
-        id="youtubeUrl"
-        class="youtube-input"
-        placeholder="Paste YouTube video link here..."
-      >
+<label class="duration-option">
+ <input type="radio" name="duration" value="60">
+ <h3>60 Sec</h3>
+ <p>Longer shorts</p>
+</label>
 
-      <p class="source-note">
-        Use videos you own or have permission to process.
-        YouTube link processing will be connected in a later update.
-      </p>
+</div>
 
-    </div>
+<label class="section-label" for="videoFile">🎬 Upload Long Video</label>
 
-    <div class="divider">OR UPLOAD A VIDEO</div>
+<div class="upload-box">
+ <div class="upload-icon">🎥</div>
+ <h3>Select your video</h3>
+ <p>MP4, MOV, MKV, AVI and WEBM</p>
+ <input type="file" id="videoFile"
+ accept=".mp4,.mov,.mkv,.avi,.webm,video/*" required>
+ <p id="fileInfo"></p>
+</div>
 
-    <!-- Video upload -->
-    <div class="upload-box">
+<label class="section-label" for="format">📱 Video Aspect Ratio</label>
 
-      <div class="upload-icon">🎬</div>
+<select id="format">
+ <option value="9:16">Vertical 9:16</option>
+ <option value="16:9">Landscape 16:9</option>
+ <option value="1:1">Square 1:1</option>
+</select>
 
-      <h3>Upload your video</h3>
+<button type="submit" id="generateBtn">
+ ✦ Generate AI Shorts
+</button>
 
-      <p>Select a video from your device</p>
+</form>
 
-      <p>MP4, MOV, MKV and other supported formats</p>
+<div id="status"></div>
 
-      <input
-        type="file"
-        id="videoFile"
-        accept="video/*"
-        required
-      >
+<div id="progressArea" hidden>
+ <p id="progressText">Ready</p>
+ <div class="progress-track">
+  <div id="progressBar"></div>
+ </div>
+</div>
 
-    </div>
-
-    <!-- Aspect ratio -->
-    <label for="format">Video aspect ratio</label>
-
-    <select id="format">
-      <option value="9:16">📱 Vertical 9:16 (Shorts)</option>
-      <option value="16:9">🖥️ Landscape 16:9</option>
-      <option value="1:1">⬜ Square 1:1</option>
-    </select>
-
-    <!-- Submit -->
-    <button type="submit">
-      ✦ Generate AI Shorts
-    </button>
-
-  </form>
-
-  <div id="status"></div>
+<div id="results"></div>
 
 </section>
 
-<section class="features">
-
-  <div class="feature">
-    <div class="feature-icon">✂️</div>
-    <h3>Smart clipping</h3>
-    <p>Discover interesting moments from longer videos.</p>
-  </div>
-
-  <div class="feature">
-    <div class="feature-icon">📱</div>
-    <h3>Vertical videos</h3>
-    <p>Create clips in your preferred aspect ratio.</p>
-  </div>
-
-  <div class="feature">
-    <div class="feature-icon">⚡</div>
-    <h3>AI workflow</h3>
-    <p>Make video creation easier and faster.</p>
-  </div>
-
+<section class="feature-grid">
+ <div class="feature">
+  <div>✂️</div>
+  <h3>Smart Clipping</h3>
+  <p>Find interesting moments automatically.</p>
+ </div>
+ <div class="feature">
+  <div>📱</div>
+  <h3>Multiple Formats</h3>
+  <p>Vertical, landscape and square videos.</p>
+ </div>
+ <div class="feature">
+  <div>⚡</div>
+  <h3>AI Workflow</h3>
+  <p>Create up to six shorts from one video.</p>
+ </div>
 </section>
 
 </main>
 
 <footer class="footer">
-  AI Shorts Maker · Create smarter, share faster.
+ AI Shorts Maker · Create smarter, share faster.
 </footer>
 
-<script src="/static/script.js?v=3"></script>
+<script src="/static/script.js?v=4"></script>
 
 </body>
 </html>
