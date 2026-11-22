@@ -3,3 +3,4 @@ uvicorn[standard]
 python-multipart
 imageio-ffmpeg
 faster-whisper 
+av==18.1.0
