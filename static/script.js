@@ -9,7 +9,6 @@ resultsBox.id = "results";
 resultsBox.style.marginTop = "30px";
 form.after(resultsBox);
 
-// Video file information
 const fileInfo = document.createElement("div");
 fileInfo.style.cssText = `
   margin-top:12px;
@@ -27,13 +26,11 @@ videoInput.addEventListener("change", function() {
         return;
     }
 
-    const size = (file.size / (1024 * 1024)).toFixed(2);
-
     fileInfo.textContent =
-        "Selected: " + file.name + " • " + size + " MB";
+        "Selected: " + file.name + " • " +
+        (file.size / (1024 * 1024)).toFixed(2) + " MB";
 });
 
-// Progress UI
 const progressBox = document.createElement("div");
 
 progressBox.innerHTML = `
@@ -41,19 +38,11 @@ progressBox.innerHTML = `
        style="margin-top:20px;color:#c4b5fd;font-size:14px">
     Ready to create
   </div>
-
-  <div style="
-    background:#29293b;
-    height:12px;
-    border-radius:20px;
-    overflow:hidden;
-    margin-top:10px">
-    <div id="progressBar" style="
-      width:0%;
-      height:100%;
-      background:linear-gradient(90deg,#8b5cf6,#67e8b5);
-      transition:width .3s">
-    </div>
+  <div style="background:#29293b;height:12px;border-radius:20px;
+       overflow:hidden;margin-top:10px">
+    <div id="progressBar" style="width:0%;height:100%;
+         background:linear-gradient(90deg,#8b5cf6,#67e8b5);
+         transition:width .3s"></div>
   </div>
 `;
 
@@ -64,7 +53,6 @@ const progressText = document.getElementById("progressText");
 
 function showProgress(value, message) {
     const percent = Math.max(0, Math.min(100, value));
-
     progressBar.style.width = percent + "%";
     progressText.textContent = percent + "% • " + message;
 }
@@ -73,14 +61,29 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function parseResponse(text) {
+async function readResponse(response) {
+    const text = await response.text();
+
+    let data;
+
     try {
-        return JSON.parse(text);
+        data = JSON.parse(text);
     } catch {
         throw new Error(
-            "Invalid server response. Please check Render logs."
+            "Server returned invalid data (HTTP " +
+            response.status +
+            "). Check Render logs."
         );
     }
+
+    if (!response.ok) {
+        throw new Error(
+            data.detail || data.message ||
+            "Server error: HTTP " + response.status
+        );
+    }
+
+    return data;
 }
 
 function uploadFile(formData) {
@@ -88,6 +91,7 @@ function uploadFile(formData) {
         const xhr = new XMLHttpRequest();
 
         xhr.open("POST", "/upload");
+        xhr.timeout = 0;
 
         xhr.upload.onprogress = function(event) {
             if (event.lengthComputable) {
@@ -99,26 +103,32 @@ function uploadFile(formData) {
             }
         };
 
-        xhr.onload = function() {
-            let result;
-
+        xhr.onload = async function() {
             try {
-                result = parseResponse(xhr.responseText);
+                const result = await readResponse({
+                    status: xhr.status,
+                    ok: xhr.status >= 200 && xhr.status < 300,
+                    text: async () => xhr.responseText
+                });
+
+                resolve(result);
             } catch (error) {
                 reject(error);
-                return;
             }
-
-            if (xhr.status < 200 || xhr.status >= 300) {
-                reject(new Error(result.detail || "Upload failed"));
-                return;
-            }
-
-            resolve(result);
         };
 
         xhr.onerror = function() {
-            reject(new Error("Network error during upload."));
+            reject(new Error(
+                "Upload connection failed. Render may have stopped."
+            ));
+        };
+
+        xhr.onabort = function() {
+            reject(new Error("Upload cancelled."));
+        };
+
+        xhr.ontimeout = function() {
+            reject(new Error("Upload timed out."));
         };
 
         xhr.send(formData);
@@ -126,15 +136,36 @@ function uploadFile(formData) {
 }
 
 async function checkJob(jobId) {
+    let failures = 0;
+
     while (true) {
-        const response = await fetch(
-            "/status/" + encodeURIComponent(jobId)
-        );
+        let response;
+        let result;
 
-        const result = parseResponse(await response.text());
+        try {
+            response = await fetch(
+                "/status/" + encodeURIComponent(jobId),
+                { cache: "no-store" }
+            );
 
-        if (!response.ok) {
-            throw new Error(result.detail || "Status check failed");
+            result = await readResponse(response);
+            failures = 0;
+
+        } catch (error) {
+            failures++;
+
+            if (failures >= 5) {
+                throw new Error(
+                    "Unable to reach server after several attempts: " +
+                    error.message
+                );
+            }
+
+            statusText.textContent =
+                "Server temporarily unavailable. Reconnecting...";
+
+            await sleep(4000);
+            continue;
         }
 
         showProgress(
@@ -150,7 +181,7 @@ async function checkJob(jobId) {
             throw new Error(result.message || "AI processing failed");
         }
 
-        await sleep(2500);
+        await sleep(3000);
     }
 }
 
@@ -158,7 +189,6 @@ function createLink(url, text, downloadName) {
     if (!url) return null;
 
     const link = document.createElement("a");
-
     link.href = url;
     link.textContent = text;
 
@@ -191,55 +221,36 @@ function showResults(shorts) {
     }
 
     const heading = document.createElement("h2");
-
     heading.textContent = "✦ Your AI Shorts";
-    heading.style.cssText = `
-      margin-bottom:20px;
-      font-size:24px;
-    `;
-
+    heading.style.marginBottom = "20px";
     resultsBox.appendChild(heading);
 
     shorts.forEach((short, index) => {
         const card = document.createElement("div");
 
         card.style.cssText = `
-          padding:20px;
-          margin:18px 0;
-          background:#13131d;
-          border:1px solid #29293b;
-          border-radius:18px;
+          padding:20px;margin:18px 0;background:#13131d;
+          border:1px solid #29293b;border-radius:18px;
         `;
 
         const title = document.createElement("h3");
-
         title.textContent = "🎬 Short Video " + (index + 1);
-
         title.style.marginBottom = "15px";
-
         card.appendChild(title);
 
         if (short.video_url) {
             const video = document.createElement("video");
-
             video.src = short.video_url;
             video.controls = true;
             video.playsInline = true;
-
             video.style.cssText = `
-              width:100%;
-              max-width:350px;
-              display:block;
-              border-radius:14px;
-              background:#000;
+              width:100%;max-width:350px;display:block;
+              border-radius:14px;background:#000;
             `;
-
             card.appendChild(video);
 
             const download = createLink(
-                short.video_url,
-                "⬇ Download Short",
-                short.video
+                short.video_url, "⬇ Download Short", short.video
             );
 
             if (download) card.appendChild(download);
@@ -270,20 +281,17 @@ form.addEventListener("submit", async function(event) {
     }
 
     const formData = new FormData();
-
     formData.append("file", file);
     formData.append("format", formatInput.value);
 
     resultsBox.replaceChildren();
 
     const button = form.querySelector("button");
-
     button.disabled = true;
     button.textContent = "✦ AI Processing...";
 
     try {
         statusText.textContent = "Uploading your video...";
-
         showProgress(0, "Starting upload...");
 
         const uploadResult = await uploadFile(formData);
@@ -293,18 +301,18 @@ form.addEventListener("submit", async function(event) {
         }
 
         statusText.textContent =
-            "Video uploaded. AI processing started...";
+            "Upload complete. AI processing started...";
 
         const result = await checkJob(uploadResult.job_id);
 
         statusText.textContent = "Your Shorts are ready!";
-
         showProgress(100, "Completed!");
-
         showResults(result.shorts);
 
     } catch (error) {
         statusText.textContent = "Error: " + error.message;
+        progressText.textContent = "Processing stopped.";
+        console.error(error);
 
     } finally {
         button.disabled = false;
