@@ -1,6 +1,5 @@
-fastapi
-uvicorn
-python-multipart
+flask
+gunicorn
 faster-whisper==1.2.1
 av==18.1.0
 imageio-ffmpeg
