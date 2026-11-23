@@ -1,621 +1,375 @@
 
 import os
-import re
 import uuid
 import threading
 import subprocess
+import shutil
 from pathlib import Path
 
-import imageio_ffmpeg
+from flask import Flask, request, jsonify, send_file, render_template_string
 from faster_whisper import WhisperModel
 
-from flask import Flask, request, jsonify, send_from_directory
-
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 500 * 1024 * 1024
 
-app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024 * 1024
+BASE_DIR = Path("/tmp/ai_shorts_maker")
+UPLOAD_DIR = BASE_DIR / "uploads"
+OUTPUT_DIR = BASE_DIR / "outputs"
 
-BASE = Path(__file__).resolve().parent
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-STATIC_FOLDER = BASE / "static"
-UPLOAD_FOLDER = BASE / "uploads"
-OUTPUT_FOLDER = BASE / "outputs"
-
-STATIC_FOLDER.mkdir(exist_ok=True)
-UPLOAD_FOLDER.mkdir(exist_ok=True)
-OUTPUT_FOLDER.mkdir(exist_ok=True)
-
-FFMPEG = imageio_ffmpeg.get_ffmpeg_exe()
-
-MODEL = None
-JOBS = {}
-JOB_LOCK = threading.Lock()
-
-
-# -------------------------
-# FRONTEND WEBSITE
-# -------------------------
-
-@app.route("/")
-def home():
-    return send_from_directory(STATIC_FOLDER, "index.html")
-
-
-@app.route("/script.js")
-def javascript():
-    return send_from_directory(STATIC_FOLDER, "script.js")
-
-
-@app.route("/static/<path:filename>")
-def static_files(filename):
-    return send_from_directory(STATIC_FOLDER, filename)
-
-
-@app.route("/health")
-def health():
-    return jsonify({
-        "status": "healthy",
-        "version": "4.1"
-    })
-
-
-# -------------------------
-# AI MODEL
-# -------------------------
+jobs = {}
+processing_lock = threading.Lock()
+model = None
 
 def get_model():
-    global MODEL
-
-    if MODEL is None:
-        MODEL = WhisperModel(
+    global model
+    if model is None:
+        model = WhisperModel(
             "tiny",
             device="cpu",
-            compute_type="int8"
+            compute_type="int8",
+            cpu_threads=2
         )
+    return model
 
-    return MODEL
-
-
-# -------------------------
-# FFMPEG
-# -------------------------
-
-def run_ffmpeg(args):
-    return subprocess.run(
-        [FFMPEG] + args,
-        capture_output=True,
-        text=True,
-        timeout=1800
+def run_command(command):
+    result = subprocess.run(
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
     )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr[-2000:])
+    return result
 
+def get_duration(video_path):
+    result = run_command([
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        str(video_path)
+    ])
+    return float(result.stdout.strip())
 
-def get_video_duration(path):
-    result = run_ffmpeg(["-i", str(path)])
-
-    match = re.search(
-        r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)",
-        result.stderr
-    )
-
-    if not match:
-        raise ValueError("Could not read video duration")
-
-    hours, minutes, seconds = match.groups()
-
-    return (
-        int(hours) * 3600
-        + int(minutes) * 60
-        + float(seconds)
-    )
-
-
-# -------------------------
-# AI CLIP SELECTION
-# -------------------------
-
-def select_best_clips(segments, video_duration, clip_length):
-
-    if video_duration < clip_length:
-        raise ValueError(
-            f"Video must be at least {clip_length} seconds long."
-        )
-
-    keywords = [
-        "important", "secret", "amazing",
-        "surprising", "why", "how",
-        "best", "never", "because",
-        "but", "however", "finally"
-    ]
-
-    candidates = []
-
-    last_start = video_duration - clip_length
-    start = 0
-
-    while start <= last_start:
-
-        end = start + clip_length
-
-        relevant = [
-            s for s in segments
-            if s["start"] < end and s["end"] > start
-        ]
-
-        text = " ".join(s["text"] for s in relevant)
-        words = text.split()
-
-        if len(words) >= 10:
-
-            lower_text = text.lower()
-
-            keyword_score = sum(
-                lower_text.count(word)
-                for word in keywords
-            )
-
-            score = min(len(words), 250) + keyword_score * 12
-
-            candidates.append({
-                "start": start,
-                "end": end,
-                "score": score
-            })
-
-        start += 5
-
-    candidates.sort(
-        key=lambda x: x["score"],
-        reverse=True
-    )
-
-    selected = []
-
-    for candidate in candidates:
-
-        overlaps = any(
-            candidate["start"] < item["end"]
-            and candidate["end"] > item["start"]
-            for item in selected
-        )
-
-        if not overlaps:
-            selected.append(candidate)
-
-        if len(selected) >= 6:
-            break
-
-    selected.sort(key=lambda x: x["start"])
-
-    if not selected:
-        raise ValueError("No suitable clips found.")
-
-    return selected
-
-
-# -------------------------
-# CAPTIONS
-# -------------------------
-
-def srt_time(seconds):
-
-    milliseconds = int(seconds * 1000)
-
-    hours = milliseconds // 3600000
-    milliseconds %= 3600000
-
-    minutes = milliseconds // 60000
-    milliseconds %= 60000
-
-    secs = milliseconds // 1000
-    milliseconds %= 1000
-
-    return (
-        f"{hours:02}:{minutes:02}:"
-        f"{secs:02},{milliseconds:03}"
-    )
-
-
-def create_srt(segments, start, end, output_path):
-
-    lines = []
-    index = 1
-
-    for segment in segments:
-
-        if segment["end"] <= start:
-            continue
-
-        if segment["start"] >= end:
-            continue
-
-        clip_start = max(0, segment["start"] - start)
-        clip_end = min(end - start, segment["end"] - start)
-
-        if clip_end <= clip_start:
-            continue
-
-        lines.extend([
-            str(index),
-            f"{srt_time(clip_start)} --> {srt_time(clip_end)}",
-            segment["text"].strip(),
-            ""
-        ])
-
-        index += 1
-
-    output_path.write_text(
-        "\n".join(lines),
-        encoding="utf-8"
-    )
-
-
-# -------------------------
-# JOB STATUS
-# -------------------------
-
-def update_job(job_id, **values):
-
-    with JOB_LOCK:
-        if job_id in JOBS:
-            JOBS[job_id].update(values)
-
-
-# -------------------------
-# VIDEO PROCESSING
-# -------------------------
-
-def process_video(job_id, filename, clip_length):
-
+def process_video(job_id, video_path):
     try:
+        jobs[job_id]["status"] = "Loading AI model"
+        jobs[job_id]["progress"] = 10
 
-        video_path = UPLOAD_FOLDER / filename
-        job_folder = OUTPUT_FOLDER / job_id
+        whisper = get_model()
 
-        job_folder.mkdir(exist_ok=True)
+        jobs[job_id]["status"] = "Transcribing audio"
+        jobs[job_id]["progress"] = 25
 
-        update_job(
-            job_id,
-            status="processing",
-            progress=5,
-            message="Reading video..."
-        )
-
-        video_duration = get_video_duration(video_path)
-
-        if video_duration < clip_length:
-            raise ValueError(
-                f"Video must be at least {clip_length} seconds long."
-            )
-
-        update_job(
-            job_id,
-            progress=15,
-            message="Loading AI speech model..."
-        )
-
-        model = get_model()
-
-        update_job(
-            job_id,
-            progress=25,
-            message="AI is analyzing speech..."
-        )
-
-        transcription, info = model.transcribe(
+        segments, info = whisper.transcribe(
             str(video_path),
             beam_size=1,
             vad_filter=True
         )
 
-        segments = []
+        segments = list(segments)
 
-        for segment in transcription:
+        jobs[job_id]["progress"] = 45
+        jobs[job_id]["status"] = "Preparing short clips"
 
-            segments.append({
-                "start": float(segment.start),
-                "end": float(segment.end),
-                "text": segment.text.strip()
-            })
+        duration = get_duration(video_path)
+        clip_length = 60
+        total_clips = max(1, int((duration + clip_length - 1) // clip_length))
 
-        if not segments:
-            raise ValueError("No speech detected in video.")
+        output_folder = OUTPUT_DIR / job_id
+        output_folder.mkdir(parents=True, exist_ok=True)
 
-        update_job(
-            job_id,
-            progress=60,
-            message="Finding the best moments..."
-        )
+        clip_files = []
 
-        clips = select_best_clips(
-            segments,
-            video_duration,
-            clip_length
-        )
+        for i in range(total_clips):
+            start = i * clip_length
+            length = min(clip_length, duration - start)
 
-        results = []
+            if length <= 0:
+                continue
 
-        for index, clip in enumerate(clips, start=1):
+            output_file = output_folder / f"short_{i+1}.mp4"
 
-            start = clip["start"]
-            end = clip["end"]
-
-            mp4_name = f"short_{index}.mp4"
-            srt_name = f"short_{index}.srt"
-
-            mp4_path = job_folder / mp4_name
-            srt_path = job_folder / srt_name
-
-            update_job(
-                job_id,
-                progress=60 + int(index / len(clips) * 35),
-                message=f"Creating clip {index} of {len(clips)}..."
-            )
-
-            create_srt(
-                segments,
-                start,
-                end,
-                srt_path
+            jobs[job_id]["status"] = (
+                f"Rendering clip {i+1} of {total_clips}"
             )
 
             command = [
-                "-y",
+                "ffmpeg", "-y",
                 "-ss", str(start),
                 "-i", str(video_path),
-                "-t", str(clip_length),
+                "-t", str(length),
                 "-vf",
-                "scale=1080:1920:force_original_aspect_ratio=increase,"
-                "crop=1080:1920,setsar=1",
+                "crop=ih*9/16:ih:(iw-ih*9/16)/2:0,"
+                "scale=1080:1920",
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
                 "-crf", "28",
-                "-pix_fmt", "yuv420p",
                 "-c:a", "aac",
                 "-b:a", "128k",
                 "-movflags", "+faststart",
-                str(mp4_path)
+                str(output_file)
             ]
 
-            result = run_ffmpeg(command)
+            run_command(command)
+            clip_files.append(output_file.name)
 
-            if result.returncode != 0:
-                raise RuntimeError(
-                    "Video rendering failed: "
-                    + result.stderr[-1500:]
-                )
+            progress = 45 + int(((i + 1) / total_clips) * 50)
+            jobs[job_id]["progress"] = min(progress, 95)
 
-            results.append({
-                "clip": index,
-                "video": mp4_name,
-                "captions": srt_name,
-                "video_url": f"/media/{job_id}/{mp4_name}",
-                "captions_url": f"/download/{job_id}/{srt_name}",
-                "start": round(start, 2),
-                "end": round(end, 2),
-                "duration": clip_length
-            })
+        jobs[job_id]["clips"] = clip_files
+        jobs[job_id]["progress"] = 100
+        jobs[job_id]["status"] = "Completed"
 
-        update_job(
-            job_id,
-            status="completed",
-            progress=100,
-            message="All clips created successfully!",
-            shorts=results,
-            language=info.language
-        )
+    except Exception as e:
+        jobs[job_id]["status"] = "Failed"
+        jobs[job_id]["error"] = str(e)[:1500]
 
-    except Exception as error:
+    finally:
+        try:
+            video_path.unlink(missing_ok=True)
+        except Exception:
+            pass
 
-        update_job(
-            job_id,
-            status="failed",
-            progress=0,
-            message=str(error)
-        )
+        processing_lock.release()
 
 
-# -------------------------
-# HOME API
-# -------------------------
+HTML = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Shorts Maker</title>
+<style>
+body {
+    background:#111827;
+    color:white;
+    font-family:Arial,sans-serif;
+    padding:20px;
+    margin:0;
+}
+.container {
+    max-width:650px;
+    margin:30px auto;
+    background:#1f2937;
+    padding:25px;
+    border-radius:15px;
+}
+h1 {text-align:center;color:#38bdf8;}
+button {
+    background:#0ea5e9;
+    border:none;
+    padding:12px 20px;
+    border-radius:8px;
+    color:white;
+    font-size:16px;
+    cursor:pointer;
+    width:100%;
+}
+input {width:100%;margin:20px 0;}
+.progress {
+    background:#374151;
+    border-radius:10px;
+    height:25px;
+    overflow:hidden;
+    margin-top:20px;
+}
+.bar {
+    height:100%;
+    background:#0ea5e9;
+    width:0%;
+    transition:width .3s;
+}
+#status {margin-top:20px;text-align:center;}
+a {color:#38bdf8;display:block;margin:12px 0;}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>AI Shorts Maker</h1>
+<p>Upload your video to create vertical 60-second clips.</p>
 
-@app.route("/api")
-def api_home():
+<input type="file" id="video" accept="video/*">
+<button onclick="uploadVideo()">Create Shorts</button>
 
-    return jsonify({
-        "app": "AI Shorts Maker",
-        "status": "running",
-        "version": "4.1"
-    })
+<div class="progress">
+<div class="bar" id="bar"></div>
+</div>
 
+<div id="status">Ready</div>
+<div id="downloads"></div>
+</div>
 
-# -------------------------
-# UPLOAD VIDEO
-# -------------------------
+<script>
+let currentJob = null;
 
-@app.route("/upload", methods=["POST"])
-def upload_video():
+async function uploadVideo() {
+    const file = document.getElementById("video").files[0];
 
-    if "video" not in request.files:
-        return jsonify({
-            "message": "Video file missing"
-        }), 400
+    if (!file) {
+        alert("Please select a video.");
+        return;
+    }
 
-    video = request.files["video"]
+    const btn = document.querySelector("button");
+    btn.disabled = true;
+    document.getElementById("downloads").innerHTML = "";
+    document.getElementById("status").innerText = "Uploading video...";
 
-    if not video.filename:
-        return jsonify({
-            "message": "Filename missing"
-        }), 400
+    const data = new FormData();
+    data.append("video", file);
 
-    extension = Path(video.filename).suffix.lower()
+    try {
+        const response = await fetch("/upload", {
+            method: "POST",
+            body: data
+        });
 
-    allowed = [
-        ".mp4", ".mov", ".mkv",
-        ".avi", ".webm"
-    ]
+        const result = await response.json();
 
-    if extension not in allowed:
-        return jsonify({
-            "message": "Unsupported video format"
-        }), 400
-
-    filename = f"{uuid.uuid4().hex}{extension}"
-
-    video.save(UPLOAD_FOLDER / filename)
-
-    return jsonify({
-        "message": "Video uploaded successfully",
-        "filename": filename
-    })
-
-
-# -------------------------
-# START PROCESSING
-# -------------------------
-
-@app.route("/process", methods=["POST"])
-def start_processing():
-
-    data = request.get_json(silent=True) or {}
-
-    filename = data.get("filename", "")
-
-    try:
-        duration = int(data.get("duration", 30))
-    except (ValueError, TypeError):
-        return jsonify({
-            "message": "Invalid duration"
-        }), 400
-
-    if duration not in [30, 60]:
-        return jsonify({
-            "message": "Duration must be 30 or 60 seconds"
-        }), 400
-
-    if not filename or Path(filename).name != filename:
-        return jsonify({
-            "message": "Invalid filename"
-        }), 400
-
-    video_path = UPLOAD_FOLDER / filename
-
-    if not video_path.is_file():
-        return jsonify({
-            "message": "Uploaded video not found"
-        }), 404
-
-    job_id = uuid.uuid4().hex
-
-    with JOB_LOCK:
-
-        JOBS[job_id] = {
-            "status": "queued",
-            "progress": 0,
-            "message": "Waiting for processing...",
-            "shorts": []
+        if (!response.ok) {
+            throw new Error(result.error || "Upload failed");
         }
 
-    thread = threading.Thread(
-        target=process_video,
-        args=(job_id, filename, duration),
-        daemon=True
-    )
+        currentJob = result.job_id;
+        pollStatus();
 
-    thread.start()
+    } catch (error) {
+        document.getElementById("status").innerText =
+            "Error: " + error.message;
+        btn.disabled = false;
+    }
+}
 
-    return jsonify({
-        "message": "Processing started",
-        "job_id": job_id,
-        "status_url": f"/status/{job_id}"
-    }), 202
+async function pollStatus() {
+    if (!currentJob) return;
 
+    try {
+        const response = await fetch("/status/" + currentJob);
+        const data = await response.json();
 
-# -------------------------
-# CHECK STATUS
-# -------------------------
+        document.getElementById("bar").style.width =
+            data.progress + "%";
+
+        document.getElementById("status").innerText =
+            data.status + " (" + data.progress + "%)";
+
+        if (data.status === "Completed") {
+            let html = "<h3>Your Shorts:</h3>";
+
+            data.clips.forEach(function(clip) {
+                html += '<a href="/download/' +
+                    currentJob + '/' + encodeURIComponent(clip) +
+                    '">Download ' + clip + '</a>';
+            });
+
+            document.getElementById("downloads").innerHTML = html;
+            document.querySelector("button").disabled = false;
+            currentJob = null;
+            return;
+        }
+
+        if (data.status === "Failed") {
+            document.getElementById("status").innerText =
+                "Failed: " + (data.error || "Unknown error");
+            document.querySelector("button").disabled = false;
+            currentJob = null;
+            return;
+        }
+
+        setTimeout(pollStatus, 3000);
+
+    } catch (error) {
+        document.getElementById("status").innerText =
+            "Connection interrupted. Rechecking processing status...";
+        setTimeout(pollStatus, 5000);
+    }
+}
+</script>
+</body>
+</html>
+"""
+
+@app.route("/")
+def home():
+    return render_template_string(HTML)
+
+@app.route("/upload", methods=["POST"])
+def upload():
+    if not processing_lock.acquire(blocking=False):
+        return jsonify({
+            "error": "Another video is processing. Please wait."
+        }), 429
+
+    try:
+        if "video" not in request.files:
+            processing_lock.release()
+            return jsonify({"error": "No video selected"}), 400
+
+        file = request.files["video"]
+
+        if not file.filename:
+            processing_lock.release()
+            return jsonify({"error": "Invalid file"}), 400
+
+        job_id = str(uuid.uuid4())
+        video_path = UPLOAD_DIR / f"{job_id}.mp4"
+
+        file.save(video_path)
+
+        jobs[job_id] = {
+            "status": "Queued",
+            "progress": 0,
+            "clips": [],
+            "error": None
+        }
+
+        thread = threading.Thread(
+            target=process_video,
+            args=(job_id, video_path),
+            daemon=True
+        )
+        thread.start()
+
+        return jsonify({"job_id": job_id})
+
+    except Exception as e:
+        if processing_lock.locked():
+            processing_lock.release()
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/status/<job_id>")
-def processing_status(job_id):
+def status(job_id):
+    job = jobs.get(job_id)
 
-    with JOB_LOCK:
+    if not job:
+        return jsonify({"error": "Job not found"}), 404
 
-        job = JOBS.get(job_id)
-
-        if job is None:
-            return jsonify({
-                "message": "Job not found"
-            }), 404
-
-        return jsonify(job)
-
-
-# -------------------------
-# VIDEO PREVIEW
-# -------------------------
-
-@app.route("/media/<job_id>/<filename>")
-def preview_video(job_id, filename):
-
-    if (
-        Path(job_id).name != job_id
-        or Path(filename).name != filename
-    ):
-        return jsonify({
-            "message": "Invalid path"
-        }), 400
-
-    folder = OUTPUT_FOLDER / job_id
-
-    if not folder.is_dir():
-        return jsonify({
-            "message": "Job not found"
-        }), 404
-
-    return send_from_directory(
-        folder,
-        filename,
-        as_attachment=False
-    )
-
-
-# -------------------------
-# DOWNLOAD
-# -------------------------
+    return jsonify(job)
 
 @app.route("/download/<job_id>/<filename>")
-def download_clip(job_id, filename):
+def download(job_id, filename):
+    folder = OUTPUT_DIR / job_id
+    file_path = folder / filename
 
-    if (
-        Path(job_id).name != job_id
-        or Path(filename).name != filename
-    ):
-        return jsonify({
-            "message": "Invalid path"
-        }), 400
+    if not file_path.exists() or file_path.parent != folder:
+        return jsonify({"error": "File not found"}), 404
 
-    folder = OUTPUT_FOLDER / job_id
-
-    if not folder.is_dir():
-        return jsonify({
-            "message": "Job not found"
-        }), 404
-
-    return send_from_directory(
-        folder,
-        filename,
-        as_attachment=True
+    return send_file(
+        str(file_path),
+        as_attachment=True,
+        download_name=filename
     )
 
-
-# -------------------------
-# RUN SERVER
-# -------------------------
+@app.errorhandler(413)
+def too_large(e):
+    return jsonify({"error": "Video is too large. Maximum 500 MB."}), 413
 
 if __name__ == "__main__":
-
-    port = int(os.environ.get("PORT", 10000))
-
     app.run(
         host="0.0.0.0",
-        port=port
+        port=int(os.environ.get("PORT", 10000))
     )
