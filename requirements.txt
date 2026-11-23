@@ -1,6 +1,6 @@
 
 flask
-faster-whisper==1.2.1
-imageio-ffmpeg
 gunicorn
+faster-whisper==1.2.1
 av==18.1.0
+imageio-ffmpeg
